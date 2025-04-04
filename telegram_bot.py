@@ -9,6 +9,131 @@ from config import TELEGRAM_BOT_TOKEN, TEST_CHANNEL_ID, MAX_CAPTION_LENGTH, IMGU
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
+class TelegramBot:
+    """Класс для отправки сообщений в Telegram."""
+    def __init__(self, token, chat_id):
+        self.token = token
+        self.chat_id = chat_id
+        self.session = None
+    
+    async def create_session(self):
+        """Создает сессию aiohttp."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self.session
+    
+    async def close_session(self):
+        """Закрывает сессию aiohttp."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+    
+    async def send_telegram_post(self, text, image=None, session=None):
+        """Отправляет пост с изображением в Telegram."""
+        logging.info(f"Отправка поста: длина текста={len(text)}, есть изображение={image is not None}")
+        
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = await self.create_session()
+        
+        try:
+            # Проверяем, что текст содержит заголовок и основной текст
+            parts = text.split("\n\n", 1)
+            if len(parts) != 2:
+                logging.warning("Неправильный формат текста поста, добавляем разделители")
+                title, content = text.split("\n", 1) if "\n" in text else (text, "")
+                text = f"{title}\n\n{content}"
+            
+            # Если есть изображение, загружаем его на Imgur
+            image_url = None
+            if image:
+                image_url = await upload_to_imgur(image, session)
+            
+            # Отправляем пост в Telegram
+            message_id, file_id = await send_telegram_post(
+                self.chat_id, text, image_url, image, session, token=self.token
+            )
+            
+            return message_id is not None
+            
+        except Exception as e:
+            logging.error(f"Ошибка отправки поста: {e}")
+            return False
+        finally:
+            if not use_existing_session and session:
+                await session.close()
+    
+    async def send_message(self, text, reply_markup=None, session=None):
+        """Отправляет текстовое сообщение в Telegram."""
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = await self.create_session()
+        
+        try:
+            message_id = await send_telegram_message(
+                self.chat_id, text, reply_markup, session, token=self.token
+            )
+            return message_id
+        except Exception as e:
+            logging.error(f"Ошибка отправки сообщения: {e}")
+            return None
+        finally:
+            if not use_existing_session and session:
+                await session.close()
+    
+    async def edit_message(self, message_id, text, reply_markup=None, session=None):
+        """Редактирует существующее сообщение в Telegram."""
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = await self.create_session()
+        
+        try:
+            result = await edit_telegram_message(
+                self.chat_id, message_id, text, reply_markup, session, token=self.token
+            )
+            return result is not None
+        except Exception as e:
+            logging.error(f"Ошибка редактирования сообщения: {e}")
+            return False
+        finally:
+            if not use_existing_session and session:
+                await session.close()
+    
+    async def delete_messages(self, message_ids, session=None):
+        """Удаляет сообщения из чата."""
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = await self.create_session()
+        
+        try:
+            result = await delete_telegram_messages(
+                self.chat_id, message_ids, session, token=self.token
+            )
+            return result
+        except Exception as e:
+            logging.error(f"Ошибка удаления сообщений: {e}")
+            return False
+        finally:
+            if not use_existing_session and session:
+                await session.close()
+    
+    async def forward_post(self, from_chat_id, message_id, session=None):
+        """Пересылает сообщение из одного чата в этот чат."""
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = await self.create_session()
+        
+        try:
+            result = await forward_telegram_post(
+                from_chat_id, message_id, self.chat_id, session, token=self.token
+            )
+            return result is not None
+        except Exception as e:
+            logging.error(f"Ошибка пересылки сообщения: {e}")
+            return False
+        finally:
+            if not use_existing_session and session:
+                await session.close()
+
 def escape_markdown(text):
     """Экранирует специальные символы для MarkdownV2, корректно обрабатывая точки и восклицательные знаки."""
     escape_chars = r"\_*[]()~`>#+-=|{}"  # Убрали . и ! отсюда
@@ -59,11 +184,12 @@ async def upload_to_imgur(image_data, session=None):
     logging.error("Не удалось загрузить изображение на Imgur после всех попыток")
     return None
 
-async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data=None, session=None):
+async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data=None, session=None, token=None):
     """
     Отправляет пост в Telegram.
     Форматирует заголовок *перед* отправкой.
     """
+    token = token or TELEGRAM_BOT_TOKEN
     logging.info(f"Отправка поста в Telegram: chat_id={chat_id}, есть изображение={image_data is not None}")
     
     # Разделяем пост на части *перед* форматированием
@@ -84,7 +210,7 @@ async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data
 
     if image_data:  # Если у нас есть бинарные данные изображения
         logging.info(f"Отправка изображения напрямую через multipart/form-data")
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
         
         # Создаем форму с multipart/form-data
         form_data = aiohttp.FormData()
@@ -102,7 +228,7 @@ async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data
         
         payload = form_data
     elif image_url:  # Если у нас есть URL изображения
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
         payload = {
             "chat_id": chat_id,
             "photo": image_url,
@@ -110,7 +236,7 @@ async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data
             "parse_mode": "MarkdownV2"
         }
     else:  # Если нет изображения
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
             "chat_id": chat_id,
             "text": final_post,
@@ -164,9 +290,10 @@ async def send_telegram_post(chat_id, formatted_post, image_url=None, image_data
     return None, None
 
 
-async def send_telegram_message(chat_id, text, reply_markup=None, session=None):
+async def send_telegram_message(chat_id, text, reply_markup=None, session=None, token=None):
     """Отправляет текстовое сообщение в Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    token = token or TELEGRAM_BOT_TOKEN
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}  # Экранируем текст *перед* отправкой
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)  # Добавляем клавиатуру, если есть
@@ -195,65 +322,101 @@ async def send_telegram_message(chat_id, text, reply_markup=None, session=None):
     logging.error("Не удалось отправить сообщение после всех попыток")
     return None
 
-async def edit_telegram_message(chat_id, message_id, text, reply_markup=None, session=None):
+async def edit_telegram_message(chat_id, message_id, text, reply_markup=None, session=None, token=None):
     """Редактирует существующее сообщение в Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
-    payload = {"chat_id": chat_id, "message_id": message_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}  # Экранируем *перед* отправкой
+    token = token or TELEGRAM_BOT_TOKEN
+    url = f"https://api.telegram.org/bot{token}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": escape_markdown(text),
+        "parse_mode": "MarkdownV2"
+    }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
 
     for attempt in range(3):
         try:
             async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response_text = await response.text()
                 if response.status != 200:
-                    logging.error(f"Ошибка редактирования сообщения (попытка {attempt + 1}): {response.status}, message='{response_text}', url='{url}'")
-                    if response.status == 400 and "can't parse entities" in response_text:
-                        logging.error("  -> Probable Markdown formatting error. Check escape_markdown().")
+                    response_text = await response.text()
+                    logging.error(f"Ошибка редактирования сообщения (попытка {attempt + 1}): {response.status}, message='{response_text}'")
+                    if "message is not modified" in response_text:
+                        logging.warning("Сообщение не было изменено, так как текст идентичен")
+                        return message_id  # Считаем успехом, если сообщение уже содержит этот текст
                     if attempt < 2:
                         await asyncio.sleep(5 * (attempt+1))
                     continue
+
+                result = await response.json()
                 logging.info(f"Сообщение отредактировано: chat_id={chat_id}, message_id={message_id}")
-                return True
+                return message_id
         except Exception as e:
             logging.error(f"Ошибка редактирования сообщения (попытка {attempt + 1}): {e}")
             if attempt < 2:
                 await asyncio.sleep(5 * (attempt + 1))
 
     logging.error("Не удалось отредактировать сообщение после всех попыток")
-    return False
+    return None
 
-async def delete_telegram_messages(chat_id, message_ids, session=None):
-    """Удаляет сообщения в Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteMessage"
+async def delete_telegram_messages(chat_id, message_ids, session=None, token=None):
+    """Удаляет сообщения из чата."""
+    token = token or TELEGRAM_BOT_TOKEN
+    if not isinstance(message_ids, list):
+        message_ids = [message_ids]
+    
+    url = f"https://api.telegram.org/bot{token}/deleteMessage"
+    results = []
+    
     for message_id in message_ids:
+        payload = {"chat_id": chat_id, "message_id": message_id}
+        
         for attempt in range(3):
             try:
-                async with session.post(url, json={"chat_id": chat_id, "message_id": message_id}, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    response.raise_for_status()
-                    logging.info(f"Сообщение удалено: chat_id={chat_id}, message_id={message_id}")
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status != 200:
+                        logging.error(f"Ошибка удаления сообщения {message_id} (попытка {attempt + 1}): {response.status}")
+                        if attempt < 2:
+                            await asyncio.sleep(2 * (attempt+1))
+                        continue
+                    
+                    results.append(message_id)
+                    logging.info(f"Сообщение {message_id} удалено из чата {chat_id}")
                     break
             except Exception as e:
-                logging.error(f"Ошибка удаления сообщения (попытка {attempt + 1}): {e}")
+                logging.error(f"Ошибка удаления сообщения {message_id} (попытка {attempt + 1}): {e}")
                 if attempt < 2:
-                    await asyncio.sleep(5 * (attempt + 1))
+                    await asyncio.sleep(2 * (attempt + 1))
+    
+    return len(results) == len(message_ids)  # True если все сообщения удалены
 
-async def forward_telegram_post(from_chat_id, message_id, to_chat_id, session=None):
-    """Пересылает (форвардит) сообщение из одного чата в другой."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/forwardMessage"
+async def forward_telegram_post(from_chat_id, message_id, to_chat_id, session=None, token=None):
+    """Пересылает сообщение из одного чата в другой."""
+    token = token or TELEGRAM_BOT_TOKEN
+    url = f"https://api.telegram.org/bot{token}/forwardMessage"
+    payload = {
+        "chat_id": to_chat_id,
+        "from_chat_id": from_chat_id,
+        "message_id": message_id
+    }
+    
     for attempt in range(3):
         try:
-            async with session.post(url, json={
-                "chat_id": to_chat_id,
-                "from_chat_id": from_chat_id,
-                "message_id": message_id
-            }, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                logging.info(f"Пост переслан: from_chat_id={from_chat_id}, message_id={message_id}, to_chat_id={to_chat_id}")
-                return True
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    logging.error(f"Ошибка пересылки сообщения (попытка {attempt + 1}): {response.status}")
+                    if attempt < 2:
+                        await asyncio.sleep(5 * (attempt+1))
+                    continue
+                
+                result = await response.json()
+                new_message_id = result["result"]["message_id"]
+                logging.info(f"Сообщение {message_id} переслано из {from_chat_id} в {to_chat_id}, новый ID: {new_message_id}")
+                return new_message_id
         except Exception as e:
-            logging.error(f"Ошибка пересылки поста (попытка {attempt + 1}): {e}")
+            logging.error(f"Ошибка пересылки сообщения (попытка {attempt + 1}): {e}")
             if attempt < 2:
                 await asyncio.sleep(5 * (attempt + 1))
-    logging.error("Не удалось переслать пост после всех попыток")
-    return False
+    
+    logging.error("Не удалось переслать сообщение после всех попыток")
+    return None
