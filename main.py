@@ -161,12 +161,32 @@ class HistoricalBot:
             logger.error("Тестовая публикация не удалась")
         return result
 
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is running')
+        
+    def log_message(self, format, *args):
+        # Отключаем логирование HTTP-запросов
+        return
+
+def start_webserver():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    logger.info(f"Запуск веб-сервера на порту {port}")
+    server.serve_forever()
+
 async def main():
     # Проверяем наличие переменных окружения
     if not os.getenv("TELEGRAM_TOKEN") or not os.getenv("TELEGRAM_CHAT_ID"):
         logger.error("Не заданы переменные окружения TELEGRAM_TOKEN или TELEGRAM_CHAT_ID")
         logger.info("Вы можете создать файл .env с этими переменными или задать их напрямую в системе")
         return
+    
+    # Запускаем веб-сервер для Render.com в отдельном потоке
+    threading.Thread(target=start_webserver, daemon=True).start()
     
     bot = HistoricalBot()
     
