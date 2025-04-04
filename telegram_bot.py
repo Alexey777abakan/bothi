@@ -419,4 +419,4 @@ async def forward_telegram_post(from_chat_id, message_id, to_chat_id, session=No
                 await asyncio.sleep(5 * (attempt + 1))
     
     logging.error("Не удалось переслать сообщение после всех попыток")
-    return None
+    return None# Telegram Bot module
