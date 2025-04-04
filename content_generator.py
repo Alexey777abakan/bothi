@@ -4,7 +4,12 @@ import logging
 import asyncio
 import re
 import traceback
-from config import MAX_POST_LENGTH
+import os
+from dotenv import load_dotenv
+from config import MAX_POST_LENGTH, OPENROUTER_API_KEY
+
+# Загружаем переменные окружения
+load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
@@ -48,10 +53,48 @@ IMAGE_PROMPT = {
     "ru": """Создай краткий промпт (до 500 символов) для FLUX API, чтобы сгенерировать фотореалистичное изображение для поста с заголовком '{title}' в теме '{theme}'. Опиши ключевую сцену с действием, персонажами, местом, настроением и объектами. Стиль — фотореализм, высокое разрешение. Не используй запрещенный контент: насилие, контент для взрослых или материалы с авторскими правами."""
 }
 
+class ContentGenerator:
+    """Класс для генерации контента для исторических постов."""
+    def __init__(self):
+        self.api = OpenRouterAPI()
+        self.language = "ru"  # Установим русский как язык по умолчанию
+        self.post_style = "информативно-развлекательный"  # Стиль постов по умолчанию
+        
+    async def generate_title(self, theme):
+        """Генерирует заголовок для поста на историческую тему."""
+        async with aiohttp.ClientSession() as session:
+            titles_text = await self.api.generate_titles(theme, 1, self.language, session)
+            if not titles_text:
+                return None
+                
+            # Берем первый заголовок из списка
+            titles = [line.strip() for line in titles_text.split('\n') if line.strip()]
+            if not titles:
+                return None
+                
+            return titles[0]
+    
+    async def generate_post_content(self, title, theme):
+        """Генерирует содержимое поста на основе заголовка и темы."""
+        async with aiohttp.ClientSession() as session:
+            content = await self.api.generate_post_content(
+                title, theme, self.post_style, MAX_POST_LENGTH, self.language, session
+            )
+            return content
+    
+    async def generate_image_prompt(self, title, content):
+        """Генерирует промпт для создания изображения."""
+        # Извлекаем тему из содержимого
+        theme = title  # По умолчанию используем заголовок как тему
+        
+        async with aiohttp.ClientSession() as session:
+            prompt = await self.api.generate_image_prompt(title, theme, self.language, session)
+            return prompt
+
 class OpenRouterAPI:
     """Класс для взаимодействия с OpenRouter API (Google Gemini)."""
     def __init__(self):
-        self.API_KEY = "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"
+        self.API_KEY = OPENROUTER_API_KEY
         self.PRIMARY_MODEL = "google/gemini-2.5-pro-exp-03-25:free"
         self.BACKUP_MODEL = "deepseek/deepseek-chat-v3-0324:free"  # Резервная модель DeepSeek
         self.LAST_RESORT_MODEL = "openai/gpt-4o-mini:free"  # Третья модель на крайний случай
@@ -199,16 +242,19 @@ class OpenRouterAPI:
             language = "en"
         prompt = POST_PROMPT[language].format(title=title, theme=theme, style=style, max_length=max_length)
         
-        # Дополнительные инструкции для обеспечения правильного формата
-        prompt += "\n\nФормат ответа должен быть строго:\n[параграф 1]\n\n[параграф 2]\n\n#хэштег1 #хэштег2 #хэштег3"
+        # Добавляем инструкции
+        prompt += f"\n\nВажно: придерживайся длины {max_length} символов и структуры с 2 абзацами и 3 хэштегами. Не используй заголовок в тексте."
         
         post_content = await self.generate_text(prompt, max_tokens=2000, session=session)
         if not post_content:
-            logging.error(f"Не удалось сгенерировать контент для '{title}'")
-            return None, None
-
-        # Попытаемся разобрать сгенерированный текст
+            logging.error("Получен пустой ответ при генерации контента поста")
+            return None
+            
         try:
+            # Обработка контента поста
+            post_content = post_content.strip()
+            
+            # Разделяем контент и хэштеги
             parts = post_content.split('\n\n')
             if len(parts) >= 3 and '#' in parts[-1]:
                 content = '\n\n'.join(parts[:-1]).strip()
@@ -250,10 +296,14 @@ class OpenRouterAPI:
                 else:
                     content = f"{content}\n\nMore details coming soon"
     
-            return content, hashtags
+            # Формируем финальный результат
+            formatted_post = f"{content}\n\n{hashtags}"
+            logging.info(f"Сгенерирован контент поста, длина={len(formatted_post)} символов")
+            return formatted_post
+            
         except Exception as e:
             logging.error(f"Ошибка обработки контента для '{title}': {e}")
-            return None, None
+            return None
 
     async def generate_image_prompt(self, title, theme, language="en", session=None):
         """Генерирует промпт для изображения."""
