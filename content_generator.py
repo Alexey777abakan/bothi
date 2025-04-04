@@ -8,7 +8,8 @@ import os
 from dotenv import load_dotenv
 from config import MAX_POST_LENGTH, OPENROUTER_API_KEY
 from prompts import TITLE_PROMPT, POST_PROMPT, IMAGE_PROMPT
-from google_ai import GoogleAI  # Добавляем импорт нового класса
+from mistral_ai import MistralAPI  # Добавляем импорт нового класса
+from google_ai import GoogleAI  # Импорт Google AI
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -28,12 +29,25 @@ class ContentGenerator:
     def __init__(self):
         self.api = OpenRouterAPI()
         self.google_ai = GoogleAI()  # Инициализируем Google AI
+        self.mistral_ai = MistralAPI()  # Инициализируем Mistral AI
         self.language = "ru"  # Установим русский как язык по умолчанию
         self.post_style = "информативно-развлекательный"  # Стиль постов по умолчанию
-        self.use_google_ai = True  # По умолчанию используем Google AI
+        self.use_google_ai = False  # По умолчанию не используем Google AI
+        self.use_mistral_ai = True  # По умолчанию используем Mistral AI
         
     async def generate_title(self, theme):
         """Генерирует заголовок для поста на историческую тему."""
+        if self.use_mistral_ai:
+            try:
+                logging.info(f"Генерация заголовка через Mistral AI для темы: {theme}")
+                title = await self.mistral_ai.generate_historical_title(theme, self.language)
+                logging.info(f"Mistral AI сгенерировал заголовок: {title}")
+                return title
+            except Exception as e:
+                logging.error(f"Ошибка генерации заголовка через Mistral AI: {e}")
+                # Если не удалось, переходим к следующему варианту
+                self.use_mistral_ai = False
+                
         if self.use_google_ai:
             try:
                 logging.info(f"Генерация заголовка через Google AI для темы: {theme}")
@@ -67,6 +81,24 @@ class ContentGenerator:
     
     async def generate_post_content(self, title, theme):
         """Генерирует содержимое поста на основе заголовка и темы."""
+        if self.use_mistral_ai:
+            try:
+                logging.info(f"Генерация содержания через Mistral AI для заголовка: {title}")
+                result = await self.mistral_ai.generate_historical_content(
+                    title=title,
+                    theme=theme,
+                    style=self.post_style,
+                    language=self.language
+                )
+                content = result["content"]
+                hashtags = result["hashtags"]
+                logging.info(f"Mistral AI сгенерировал контент длиной {len(content)} символов и хэштеги: {hashtags}")
+                return f"{content}\n\n{hashtags}"
+            except Exception as e:
+                logging.error(f"Ошибка генерации контента через Mistral AI: {e}")
+                # Если не удалось, переходим к следующему варианту
+                self.use_mistral_ai = False
+                
         if self.use_google_ai:
             try:
                 logging.info(f"Генерация содержания через Google AI для заголовка: {title}")
@@ -92,6 +124,17 @@ class ContentGenerator:
     
     async def generate_image_prompt(self, title, theme, language="en", session=None):
         """Генерирует промпт для создания изображения."""
+        if self.use_mistral_ai:
+            try:
+                logging.info(f"Генерация промпта для изображения через Mistral AI: {title}")
+                image_prompt = await self.mistral_ai.generate_image_prompt(title, theme, language)
+                logging.info(f"Mistral AI сгенерировал промпт для изображения длиной {len(image_prompt)} символов")
+                return image_prompt
+            except Exception as e:
+                logging.error(f"Ошибка генерации промпта для изображения через Mistral AI: {e}")
+                # Если не удалось, переходим к следующему варианту
+                self.use_mistral_ai = False
+                
         if self.use_google_ai:
             try:
                 logging.info(f"Генерация промпта для изображения через Google AI: {title}")

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: telegram-historical-bot
+    name: publicistorii-bot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
@@ -10,11 +10,19 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: RUN_MODE
+        sync: false
+      - key: POST_INTERVAL_HOURS
+        sync: false
+      - key: HUGGING_FACE_TOKEN
+        sync: false
       - key: OPENROUTER_API_KEY
         sync: false
       - key: FLUX_API_KEY
         sync: false
-      - key: POST_INTERVAL_HOURS
-        value: 6
       - key: GOOGLE_AI_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_MODEL
         sync: false 
