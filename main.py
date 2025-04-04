@@ -435,6 +435,7 @@ async def handle_updates(open_router_api, flux_api):
                                     logging.error(f"Ошибка при определении языка: {e}")
                                     язык_поста = язык  # Используем текущий язык пользователя как запасной вариант
                                 
+                                стиль = current_style.get(chat_id, "expert")
                                 await save_client_settings(chat_id, theme=тема, post_count=количество_постов, language=язык_поста)
                                 await save_usage_stat(chat_id, "тема_установлена")
                                 await send_telegram_message(chat_id, translations[язык]["theme_saved"].format(theme=тема, post_count=количество_постов), главное_меню, session)
@@ -608,9 +609,17 @@ async def handle_updates(open_router_api, flux_api):
                                     await send_telegram_message(chat_id, translations[язык]["theme_error"], главное_меню, session)
                                     await asyncio.sleep(0.1)
                                     continue
-                                язык_темы = detect(тема)
-                                язык_поста = язык_темы if язык_темы in translations else язык
-                                logging.info(f"Определен язык темы для генерации: {язык_поста}")
+                                
+                                # Определяем язык темы с помощью langdetect
+                                try:
+                                    язык_темы = detect(тема)
+                                    logging.info(f"Определен язык темы для генерации: {язык_темы}")
+                                    # Используем язык темы, если он поддерживается, иначе текущий язык пользователя
+                                    язык_поста = язык_темы if язык_темы in ["ru", "en"] else язык
+                                except Exception as e:
+                                    logging.error(f"Ошибка при определении языка: {e}")
+                                    язык_поста = язык  # Используем текущий язык пользователя как запасной вариант
+                                
                                 стиль = current_style.get(chat_id, "expert")
                                 message_id = await send_telegram_message(chat_id, translations[язык]["generating"].format(i=1, post_count=количество_постов, progress=0), главное_меню, session)
                                 заголовки = await open_router_api.generate_titles(тема, количество_постов, language=язык_поста, session=session)
