@@ -15,4 +15,6 @@ services:
       - key: FLUX_API_KEY
         sync: false
       - key: POST_INTERVAL_HOURS
-        value: 6 
+        value: 6
+      - key: GOOGLE_AI_KEY
+        sync: false 

@@ -7,6 +7,8 @@ import traceback
 import os
 from dotenv import load_dotenv
 from config import MAX_POST_LENGTH, OPENROUTER_API_KEY
+from prompts import TITLE_PROMPT, POST_PROMPT, IMAGE_PROMPT
+from google_ai import GoogleAI  # Добавляем импорт нового класса
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -21,47 +23,36 @@ logging.basicConfig(
     ]
 )
 
-# Шаблоны остаются такими же
-TITLE_PROMPT = {
-    "en": """Generate exactly {post_count} short, unique, and engaging titles for Telegram posts, focusing on key events, aspects, or examples of the theme '{theme}'. Distribute the titles evenly across significant moments, figures, or impacts related to the theme. Do not use quotation marks, numbers, or any prefixes/suffixes in the titles. Provide only titles, one per line, without extra text or numbering.""",
-    "ru": """Сгенерируй ровно {post_count} коротких, уникальных и цепляющих заголовков для Telegram-постов, фокусируясь на ключевых событиях, аспектах или примерах темы '{theme}'. Распредели заголовки равномерно по значимым моментам, фигурам или воздействиям, связанным с темой. Не используй кавычки, цифры, префиксы или суффиксы в заголовках. Предоставь только заголовки, по одному на строку, без дополнительного текста, нумерации или форматирования.""",
-}
-
-POST_PROMPT = {
-    "en": """Write an SEO-optimized post in {style} style for Telegram with the title '{title}'. Explore the event, aspect, or example from the title, related to the theme '{theme}', without literally repeating the title or theme. Use vivid, emotional language, specific examples, and compelling arguments to engage the reader. Structure the content into 2 concise, energetic paragraphs for readability. Length: strictly up to {max_length} characters, including exactly 3 SEO-friendly hashtags (short, trending, relevant) on a new line. Format:
-
-[paragraph 1]
-
-[paragraph 2]
-
-#hashtag1 #hashtag2 #hashtag3
-
-IMPORTANT: Do not repeat the title and its parts in the post text. Start directly with exploring the topic.""",
-    "ru": """Напиши SEO-оптимизированный пост в стиле {style} для Telegram с заголовком '{title}'. Раскрой событие, аспект или пример из заголовка, связанный с темой '{theme}', не повторяя дословно заголовок или тему. Используй яркий, эмоциональный язык, конкретные примеры и убедительные аргументы, чтобы зацепить читателя. Структурируй контент в 2 сжатых, энергичных абзаца для удобства чтения. Длина: строго до {max_length} символов, включая ровно 3 SEO-дружественных хэштега (коротких, трендовых, релевантных) на новой строке. Формат:
-
-[абзац 1]
-
-[абзац 2]
-
-#хэштег1 #хэштег2 #хэштег3
-
-ВАЖНО: Не повторяй заголовок и его части в тексте поста. Начни сразу с раскрытия темы.""",
-}
-
-IMAGE_PROMPT = {
-    "en": """Create a concise prompt (under 500 characters) for FLUX image generation API to create a photorealistic image for a post titled '{title}' in the theme '{theme}'. Describe a key scene with main action, characters, setting, mood, and objects. Use photorealistic style, high resolution. Do not use any forbidden content like violence, adult content, or copyright material.""",
-    "ru": """Создай краткий промпт (до 500 символов) для FLUX API, чтобы сгенерировать фотореалистичное изображение для поста с заголовком '{title}' в теме '{theme}'. Опиши ключевую сцену с действием, персонажами, местом, настроением и объектами. Стиль — фотореализм, высокое разрешение. Не используй запрещенный контент: насилие, контент для взрослых или материалы с авторскими правами."""
-}
-
 class ContentGenerator:
     """Класс для генерации контента для исторических постов."""
     def __init__(self):
         self.api = OpenRouterAPI()
+        self.google_ai = GoogleAI()  # Инициализируем Google AI
         self.language = "ru"  # Установим русский как язык по умолчанию
         self.post_style = "информативно-развлекательный"  # Стиль постов по умолчанию
+        self.use_google_ai = True  # По умолчанию используем Google AI
         
     async def generate_title(self, theme):
         """Генерирует заголовок для поста на историческую тему."""
+        if self.use_google_ai:
+            try:
+                logging.info(f"Генерация заголовка через Google AI для темы: {theme}")
+                prompt = f"""
+                Создай интересный и привлекательный заголовок для исторического поста на тему: {theme}.
+                Заголовок должен быть на русском языке, коротким (до 50 символов) и вызывать интерес к чтению.
+                Не используй кавычки вокруг заголовка. Верни только сам заголовок, без вводных слов.
+                """
+                title = await self.google_ai.generate_content(prompt, max_tokens=50, temperature=0.8)
+                # Очистка от кавычек и лишних символов
+                title = title.strip('"\'„"').strip()
+                logging.info(f"Google AI сгенерировал заголовок: {title}")
+                return title
+            except Exception as e:
+                logging.error(f"Ошибка генерации заголовка через Google AI: {e}")
+                # Если не удалось, используем запасной вариант
+                self.use_google_ai = False
+        
+        # Запасной вариант через OpenRouter API
         async with aiohttp.ClientSession() as session:
             titles_text = await self.api.generate_titles(theme, 1, self.language, session)
             if not titles_text:
@@ -76,20 +67,75 @@ class ContentGenerator:
     
     async def generate_post_content(self, title, theme):
         """Генерирует содержимое поста на основе заголовка и темы."""
+        if self.use_google_ai:
+            try:
+                logging.info(f"Генерация содержания через Google AI для заголовка: {title}")
+                result = await self.google_ai.generate_historical_content(
+                    theme=theme,
+                    style=self.post_style,
+                    format_type="post"
+                )
+                content = result["content"]
+                logging.info(f"Google AI сгенерировал контент длиной {len(content)} символов")
+                return content
+            except Exception as e:
+                logging.error(f"Ошибка генерации контента через Google AI: {e}")
+                # Если не удалось, используем запасной вариант
+                self.use_google_ai = False
+        
+        # Запасной вариант через OpenRouter API
         async with aiohttp.ClientSession() as session:
             content = await self.api.generate_post_content(
                 title, theme, self.post_style, MAX_POST_LENGTH, self.language, session
             )
             return content
     
-    async def generate_image_prompt(self, title, content):
+    async def generate_image_prompt(self, title, theme, language="en", session=None):
         """Генерирует промпт для создания изображения."""
-        # Извлекаем тему из содержимого
-        theme = title  # По умолчанию используем заголовок как тему
+        if self.use_google_ai:
+            try:
+                logging.info(f"Генерация промпта для изображения через Google AI: {title}")
+                image_prompt = await self.google_ai.generate_image_prompt(theme, "фотореалистичный")
+                logging.info(f"Google AI сгенерировал промпт для изображения длиной {len(image_prompt)} символов")
+                return image_prompt
+            except Exception as e:
+                logging.error(f"Ошибка генерации промпта для изображения через Google AI: {e}")
+                # Если не удалось, используем запасной вариант
+                self.use_google_ai = False
         
-        async with aiohttp.ClientSession() as session:
-            prompt = await self.api.generate_image_prompt(title, theme, self.language, session)
-            return prompt
+        # Оригинальный метод остается без изменений для резервного использования
+        logging.info(f"Генерация описания изображения для '{title}' на языке: {language}")
+        if language not in IMAGE_PROMPT:
+            language = "en"
+        
+        # Создаем резервный промпт заранее
+        if language == "ru":
+            backup_prompt = f"Фотореалистичное изображение средневекового замка на фоне европейского пейзажа, связанное с темой '{title}'. Высокое качество, детализация, дневное освещение."
+        else:
+            backup_prompt = f"Photorealistic image of a medieval castle against a European landscape, related to '{title}'. High quality, detailed, daylight."
+        
+        try:
+            prompt = IMAGE_PROMPT[language].format(title=title, theme=theme)
+            
+            # Дополнительные инструкции для создания качественного промпта (делаем их короче)
+            prompt += "\n\nВажно: создай краткий, четкий промпт для изображения."
+            
+            image_prompt = await self.api.generate_text(prompt, max_tokens=100, session=session)
+            
+            # Проверяем, не пустой ли ответ
+            if not image_prompt or len(image_prompt.strip()) < 10:
+                logging.warning(f"Получен пустой или слишком короткий промпт для изображения, использую резервный")
+                return backup_prompt
+            
+            # Ограничение длины промпта
+            if len(image_prompt) > 300:
+                image_prompt = image_prompt[:300].rsplit(' ', 1)[0] + '.'
+                
+            return image_prompt.strip()
+            
+        except Exception as e:
+            logging.error(f"Ошибка при генерации промпта для изображения: {e}")
+            return backup_prompt
 
 class OpenRouterAPI:
     """Класс для взаимодействия с OpenRouter API (Google Gemini)."""
