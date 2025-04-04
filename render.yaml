@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: telegram-historical-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    plan: free
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: FLUX_API_KEY
+        sync: false
+      - key: POST_INTERVAL_HOURS
+        value: 6 
